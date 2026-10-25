@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>暗記カード</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
+    <style>
+        :root { --primary: #4CAF50; --primary-dark: #388E3C; --bg-color: #f4f7f6; --text-color: #333; }
+        body { font-family: 'Helvetica Neue', Arial, sans-serif; background-color: var(--bg-color); color: var(--text-color); margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
+        .container { width: 100%; max-width: 600px; background: #fff; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        h1 { text-align: center; cursor: pointer; user-select: none; }
+        h2 { text-align: center; }
+        .settings-group { background: #f9f9f9; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #eee; }
+        .settings-group p { margin: 0 0 10px 0; font-weight: bold; color: #555; }
+        .settings-group label { display: block; margin-bottom: 8px; cursor: pointer; }
+        .settings-group input[type="radio"], .settings-group input[type="checkbox"] { transform: scale(1.2); margin-right: 8px; }
+        .mode-buttons { display: grid; grid-template-columns: 1fr; gap: 10px; }
+        button { width: 100%; padding: 12px; font-size: 16px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; cursor: pointer; transition: background 0.3s; }
+        .btn-random { background-color: #2196F3; color: white; border: none; font-weight: bold; }
+        .btn-random:hover { background-color: #1976D2; }
+        .btn-category { background-color: var(--primary); color: white; border: none; font-weight: bold; }
+        .btn-category:hover { background-color: var(--primary-dark); }
+        .btn-secondary { background-color: #607D8B; color: white; border: none; }
+        
+        .card-scene { perspective: 1000px; margin: 30px 0; }
+        .card { width: 100%; height: 250px; position: relative; transition: transform 0.6s; transform-style: preserve-3d; cursor: pointer; }
+        .card.is-flipped { transform: rotateY(180deg); }
+        .card-face { position: absolute; width: 100%; height: 100%; backface-visibility: hidden; display: flex; align-items: center; justify-content: center; padding: 20px; box-sizing: border-box; border-radius: 12px; font-size: 20px; font-weight: bold; text-align: center; box-shadow: 0 4px 8px rgba(0,0,0,0.2); flex-direction: column; }
+        .card-front { background-color: #fff; border: 2px solid var(--primary); color: var(--text-color); }
+        .card-back { background-color: #e8f5e9; border: 2px solid var(--primary-dark); transform: rotateY(180deg); color: var(--primary-dark); }
+        .click-hint { position: absolute; bottom: 10px; font-size: 12px; color: #999; font-weight: normal; }
+        .set-badge { position: absolute; top: 10px; left: 10px; font-size: 12px; padding: 3px 8px; border-radius: 4px; background: #eee; color: #555; font-weight: normal; }
+        
+        .action-buttons { display: none; justify-content: space-between; margin-top: 20px; }
+        .btn-correct, .btn-wrong { width: 48%; padding: 15px; font-size: 18px; border: none; border-radius: 8px; color: white; cursor: pointer; }
+        .btn-correct { background-color: #4CAF50; }
+        .btn-wrong { background-color: #F44336; }
+        
+        #play-screen, #result-screen, #admin-screen, #menu-screen { display: none; }
+        .stats-table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 12px; }
+        .stats-table th, .stats-table td { border: 1px solid #ddd; padding: 6px; text-align: left; }
+        .stats-table th { background-color: #f2f2f2; font-size: 11px; }
+        .table-wrapper { overflow-x: auto; max-height: 500px; margin-top: 15px; }
+        .col-a { background-color: #e3f2fd; }
+        .col-b { background-color: #f3e5f5; }
+        
+        sup, sub { font-size: 0.75em; line-height: 0; position: relative; vertical-align: baseline; }
+        sup { top: -0.5em; }
+        sub { bottom: -0.25em; }
+        #loading { text-align: center; font-weight: bold; color: #2196F3; margin-top: 50px; }
+    </style>
+</head>
+<body>
+
+<!-- Loading Screen -->
+<div id="loading">サーバーと通信しています...</div>
+
+<!-- Menu Screen (Player) -->
+<div class="container" id="menu-screen">
+    <h1 onclick="checkAdmin()">暗記カード</h1>
+    <div class="settings-group">
+        <p>【出題設定】</p>
+        <div>
+            <label><input type="radio" name="q-type" value="A" checked> ベーシック</label>
+            <label><input type="radio" name="q-type" value="B"> スタンダード</label>
+            <label><input type="radio" name="q-type" value="MIX"> シャッフル</label>
+        </div>
+        <div style="margin-top: 10px; border-top: 1px dashed #ccc; padding-top: 10px;">
+            <label><input type="checkbox" id="random-order"> 単元別のとき出題順をランダムにする</label>
+        </div>
+    </div>
+    <div class="mode-buttons" id="mode-buttons-container"></div>
+</div>
+
+<!-- Play Screen -->
+<div class="container" id="play-screen">
+    <h2 id="question-counter">問題 1 / 10</h2>
+    <div class="card-scene">
+        <div class="card" id="flashcard" onclick="flipCard()">
+            <div class="card-face card-front">
+                <span class="set-badge" id="badge-front"></span>
+                <span id="card-question"></span>
+                <span class="click-hint">タップして裏返す</span>
+            </div>
+            <div class="card-face card-back">
+                <span id="card-answer"></span>
+            </div>
+        </div>
+    </div>
+    <div class="action-buttons" id="action-buttons">
+        <button class="btn-wrong" onclick="recordResult(false)">❌ 不正解</button>
+        <button class="btn-correct" onclick="recordResult(true)">⭕ 正解</button>
+    </div>
+</div>
+
+<!-- Result Screen -->
+<div class="container" id="result-screen">
+    <h2>結果発表</h2>
+    <p style="text-align: center; font-size: 24px;" id="result-score"></p>
+    <button class="btn-secondary" onclick="location.reload()">メニューに戻る</button>
+</div>
+
+<!-- Admin Screen (Hidden) -->
+<div class="container" id="admin-screen">
+    <h2>【管理者画面】</h2>
+    <button class="btn-secondary" onclick="location.reload()" style="margin-bottom:20px;">通常メニューに戻る</button>
+    
+    <div class="settings-group" style="background:#e3f2fd; border-color:#2196F3;">
+        <p>【問題のアップロード】<br><small>B列:問題(ベーシック) / C列:解答(スタンダード) / D列:単元名</small></p>
+        <input type="file" id="file-input" accept=".csv, .xlsx">
+    </div>
+
+    <button class="btn-wrong" onclick="clearStats()" style="margin-bottom:10px;">全プレイヤーの正答率データをリセット</button>
+    <div class="table-wrapper">
+        <table class="stats-table">
+            <thead>
+                <tr>
+                    <th rowspan="2">ID</th>
+                    <th rowspan="2">ベーシック問題文</th>
+                    <th colspan="2" class="col-a">ベーシック出題時</th>
+                    <th colspan="2" class="col-b">スタンダード出題時</th>
+                </tr>
+                <tr>
+                    <th class="col-a">正答率</th><th class="col-a">正解/出題</th>
+                    <th class="col-b">正答率</th><th class="col-b">正解/出題</th>
+                </tr>
+            </thead>
+            <tbody id="stats-tbody"></tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+// ==========================================
+// ★ここにコピーしたウェブアプリのURLを貼り付けます★
+const GAS_URL = "https://script.google.com/macros/s/AKfycbzEwJYmWp0WChWlrN2ZpVBaLw7XY5iHjWhOHC4mV1fMpjzftpL9jYoAnFuB6NXCYU9gDg/exec";
+// 管理者画面に入るためのパスワード
+const ADMIN_PASSWORD = "1234";
+// ==========================================
+
+let rawData = [];
+let currentQuestions = [];
+let currentIndex = 0;
+let correctCount = 0;
+let isFlipped = false;
+let sessionStats = {}; 
+
+let adminClickCount = 0;
+let adminClickTimer = null;
+
+window.onload = async () => {
+    try {
+        const response = await fetch(GAS_URL + "?action=getQuestions");
+        rawData = await response.json();
+        
+        document.getElementById('loading').style.display = "none";
+        
+        if (rawData.length > 0) {
+            document.getElementById('menu-screen').style.display = "block";
+            generateButtons();
+        } else {
+            // 問題が空の場合（初回起動時など）
+            document.getElementById('loading').innerText = "問題が登録されていません。タイトルを5回タップして管理画面からアップロードしてください。";
+        }
+    } catch (e) {
+        document.getElementById('loading').innerText = "通信エラーが発生しました。URLが正しいか確認してください。";
+    }
+};
+
+function generateButtons() {
+    const categories = [...new Set(rawData.map(q => q.category))];
+    const container = document.getElementById("mode-buttons-container");
+    container.innerHTML = "";
+
+    const btnRandom = document.createElement("button");
+    btnRandom.className = "btn-random";
+    btnRandom.innerText = "ランダム";
+    btnRandom.onclick = () => startGame('random');
+    container.appendChild(btnRandom);
+    
+    categories.forEach(c => {
+        const btn = document.createElement("button");
+        btn.className = "btn-category";
+        btn.innerText = c;
+        btn.onclick = () => startGame(c);
+        container.appendChild(btn);
+    });
+}
+
+function checkAdmin() {
+    adminClickCount++;
+    clearTimeout(adminClickTimer);
+    if (adminClickCount >= 5) {
+        adminClickCount = 0;
+        const pass = prompt("管理者パスワードを入力してください");
+        if (pass === ADMIN_PASSWORD) {
+            openAdminScreen();
+        } else {
+            alert("パスワードが違います");
+        }
+    } else {
+        adminClickTimer = setTimeout(() => { adminClickCount = 0; }, 1000);
+    }
+}
+
+async function openAdminScreen() {
+    document.getElementById('loading').style.display = "block";
+    document.getElementById('loading').innerText = "データを取得中...";
+    document.getElementById('menu-screen').style.display = "none";
+    
+    try {
+        const response = await fetch(GAS_URL + "?action=getStats");
+        const stats = await response.json();
+        renderStatsTable(stats);
+        
+        document.getElementById('loading').style.display = "none";
+        document.getElementById('admin-screen').style.display = "block";
+    } catch(e) {
+        alert("正答率の取得に失敗しました");
+        location.reload();
+    }
+}
+
+// === プレイヤーのゲーム進行ロジック ===
+function shuffle(array) {
+    let arr = [...array];
+    for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+}
+
+function startGame(mode) {
+    const globalModeType = document.querySelector('input[name="q-type"]:checked').value;
+    const isRandomOrder = document.getElementById("random-order").checked;
+    
+    let targetData = mode === "random" ? [...rawData] : rawData.filter(q => q.category === mode);
+    
+    if (mode === "random" || isRandomOrder) {
+        targetData = shuffle(targetData);
+    }
+    if (mode === "random") {
+        targetData = targetData.slice(0, 10);
+    }
+
+    currentQuestions = targetData.map(q => {
+        let actualType = globalModeType;
+        if (globalModeType === 'MIX') { actualType = Math.random() < 0.5 ? 'A' : 'B'; }
+        return { ...q, activeType: actualType };
+    });
+    
+    currentIndex = 0;
+    correctCount = 0;
+    sessionStats = {};
+    
+    document.getElementById("menu-screen").style.display = "none";
+    document.getElementById("play-screen").style.display = "block";
+    showQuestion();
+}
+
+function showQuestion() {
+    isFlipped = false;
+    const card = document.getElementById("flashcard");
+    
+    card.style.transition = "none";
+    card.classList.remove("is-flipped");
+    document.getElementById("action-buttons").style.display = "none";
+    document.getElementById("question-counter").innerText = `問題 ${currentIndex + 1} / ${currentQuestions.length}`;
+    
+    const q = currentQuestions[currentIndex];
+    
+    if (q.activeType === 'A') {
+        document.getElementById("card-question").innerHTML = q.questionA;
+        document.getElementById("card-answer").innerHTML = q.questionB;
+        document.getElementById("badge-front").innerText = "ベーシック";
+    } else {
+        document.getElementById("card-question").innerHTML = q.questionB;
+        document.getElementById("card-answer").innerHTML = q.questionA;
+        document.getElementById("badge-front").innerText = "スタンダード";
+    }
+    
+    setTimeout(() => { card.style.transition = "transform 0.6s"; }, 50);
+}
+
+function flipCard() {
+    if (isFlipped) return;
+    isFlipped = true;
+    document.getElementById("flashcard").classList.add("is-flipped");
+    setTimeout(() => { document.getElementById("action-buttons").style.display = "flex"; }, 400);
+}
+
+function recordResult(isCorrect) {
+    const q = currentQuestions[currentIndex];
+    
+    if (!sessionStats[q.id]) {
+        sessionStats[q.id] = { text: q.questionA, A: { total:0, correct:0 }, B: { total:0, correct:0 } };
+    }
+    
+    sessionStats[q.id][q.activeType].total += 1;
+    if (isCorrect) {
+        sessionStats[q.id][q.activeType].correct += 1;
+        correctCount++;
+    }
+    
+    currentIndex++;
+    if (currentIndex < currentQuestions.length) {
+        showQuestion();
+    } else {
+        finishGame();
+    }
+}
+
+async function finishGame() {
+    document.getElementById("play-screen").style.display = "none";
+    document.getElementById('loading').style.display = "block";
+    document.getElementById('loading').innerText = "結果を送信しています...";
+    
+    try {
+        await fetch(GAS_URL, {
+            method: 'POST',
+            body: JSON.stringify({ action: 'saveStats', stats: sessionStats })
+        });
+    } catch(e) {
+        console.error("結果の送信に失敗しました");
+    }
+    
+    document.getElementById('loading').style.display = "none";
+    document.getElementById("result-screen").style.display = "block";
+    document.getElementById("result-score").innerText = `正解数: ${correctCount} / ${currentQuestions.length}`;
+}
+
+// === 管理者のファイルアップロード処理 ===
+function parseExcelJSRichText(cellValue) {
+    if (cellValue === null || cellValue === undefined) return "";
+    if (cellValue.richText) {
+        let html = "";
+        cellValue.richText.forEach(part => {
+            let text = part.text !== undefined ? String(part.text) : "";
+            if (!text) return;
+            text = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>");
+            if (part.font && part.font.vertAlign === 'superscript') html += `<sup>${text}</sup>`;
+            else if (part.font && part.font.vertAlign === 'subscript') html += `<sub>${text}</sub>`;
+            else html += text;
+        });
+        return html;
+    }
+    if (cellValue.result !== undefined) return String(cellValue.result).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>");
+    return String(cellValue).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>");
+}
+
+document.getElementById('file-input').addEventListener('change', async function(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    if(!confirm("新しい問題をアップロードすると、現在の問題リストが上書きされます。よろしいですか？")) return;
+
+    document.getElementById('admin-screen').style.display = "none";
+    document.getElementById('loading').style.display = "block";
+    document.getElementById('loading').innerText = "Excelを解析・アップロード中...";
+
+    try {
+        let newQuestions = [];
+        let idCounter = 1;
+        
+        const arrayBuffer = await file.arrayBuffer();
+        const workbook = new ExcelJS.Workbook();
+        
+        await workbook.xlsx.load(arrayBuffer);
+        const worksheet = workbook.worksheets[0];
+        
+        worksheet.eachRow((row, rowNumber) => {
+            if (rowNumber === 1) return;
+            const cellB = row.getCell(2).value; 
+            const cellC = row.getCell(3).value;
+            const cellD = row.getCell(4).value;
+            
+            if (!cellB || !cellC) return;
+            const textD = cellD && cellD.result !== undefined ? String(cellD.result) : (cellD ? String(cellD) : "");
+            if (!textD || textD.trim() === "" || textD.trim() === "未分類(D列なし)") return;
+
+            newQuestions.push({
+                id: idCounter++,
+                questionA: parseExcelJSRichText(cellB).trim(),
+                questionB: parseExcelJSRichText(cellC).trim(),
+                category: textD.trim()
+            });
+        });
+
+        await fetch(GAS_URL, {
+            method: 'POST',
+            body: JSON.stringify({ action: 'updateQuestions', data: newQuestions })
+        });
+        
+        alert("アップロードが完了しました！");
+        location.reload();
+    } catch (error) {
+        alert("エラーが発生しました。\n" + error.message);
+        location.reload();
+    }
+});
+
+function renderStatsTable(stats) {
+    const tbody = document.getElementById("stats-tbody");
+    tbody.innerHTML = "";
+    Object.keys(stats).forEach(id => {
+        const tr = document.createElement("tr");
+        const s = stats[id];
+        
+        const rateA = s.A.total > 0 ? Math.round((s.A.correct / s.A.total) * 100) + '%' : '-';
+        const rateB = s.B.total > 0 ? Math.round((s.B.correct / s.B.total) * 100) + '%' : '-';
+        
+        tr.innerHTML = `
+            <td>${id}</td>
+            <td>${s.text}</td>
+            <td class="col-a">${rateA}</td><td class="col-a">${s.A.correct} / ${s.A.total}</td>
+            <td class="col-b">${rateB}</td><td class="col-b">${s.B.correct} / ${s.B.total}</td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+async function clearStats() {
+    if (confirm("全プレイヤーの正答率データを完全にリセットします。よろしいですか？")) {
+        document.getElementById('admin-screen').style.display = "none";
+        document.getElementById('loading').style.display = "block";
+        document.getElementById('loading').innerText = "削除しています...";
+        await fetch(GAS_URL, {
+            method: 'POST',
+            body: JSON.stringify({ action: 'resetStats' })
+        });
+        alert("リセットしました。");
+        location.reload();
+    }
+}
+</script>
+</body>
+</html>
